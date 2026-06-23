@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Discord Voice Player - Treo room phát MP3 (Bot Token)
-Đã sửa lỗi voice_clients
+Có xử lý reconnect khi bị ngắt và nhiều tính năng nâng cao
 """
 
 import discord
@@ -9,11 +9,12 @@ from discord.ext import commands
 import asyncio
 import os
 import sys
+import time
 import subprocess
 from pathlib import Path
 from typing import Optional
-import glob
 import random
+import glob
 
 # ==================== CẤU HÌNH ====================
 BOT_TOKEN = input("🔑 Nhập Bot Token: ").strip()
@@ -21,15 +22,18 @@ VOICE_CHANNEL_ID = int(input("🎤 Nhập ID phòng voice: ").strip())
 
 # Lấy thư mục chứa script
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-MUSIC_FOLDER = os.path.join(SCRIPT_DIR, "music")
+MUSIC_FOLDER = os.path.join(SCRIPT_DIR, "music")  # Thư mục chứa nhạc
 
 # Tạo thư mục music nếu chưa có
 os.makedirs(MUSIC_FOLDER, exist_ok=True)
 
 # Tìm file MP3
 def find_mp3_files():
+    """Tìm tất cả file MP3 trong thư mục music và thư mục chính"""
     mp3_files = []
+    # Tìm trong thư mục music
     mp3_files.extend(glob.glob(os.path.join(MUSIC_FOLDER, "*.mp3")))
+    # Tìm trong thư mục chính
     mp3_files.extend(glob.glob(os.path.join(SCRIPT_DIR, "*.mp3")))
     return mp3_files
 
@@ -39,6 +43,7 @@ if not mp3_files:
     print(f"📁 Hãy đặt file MP3 vào thư mục: {MUSIC_FOLDER} hoặc thư mục chính")
     sys.exit()
 
+# Chọn file mặc định (file đầu tiên)
 DEFAULT_MP3 = mp3_files[0]
 print(f"✅ Sử dụng file mặc định: {os.path.basename(DEFAULT_MP3)}")
 print(f"📁 Tổng số file MP3 tìm thấy: {len(mp3_files)}")
@@ -51,19 +56,15 @@ intents.guilds = True
 intents.members = True
 
 bot = commands.Bot(command_prefix=["!", "/"], intents=intents)
-
-# Xóa lệnh help mặc định
-bot.remove_command('help')
-
 vc: Optional[discord.VoiceClient] = None
 is_playing = False
 current_mp3 = DEFAULT_MP3
 playlist = mp3_files.copy()
 current_index = 0
 reconnect_count = 0
-volume_level = 0.5
-loop_mode = "loop_one"
-auto_play = True
+volume_level = 0.5  # Mặc định 50%
+loop_mode = "loop_one"  # loop_one, loop_all, shuffle, none
+auto_play = True  # Tự động phát khi có người vào
 
 @bot.event
 async def on_ready():
@@ -82,22 +83,19 @@ async def connect_to_voice():
             print(f"❌ Không tìm thấy phòng voice ID: {VOICE_CHANNEL_ID}")
             return
 
-        # Kiểm tra bot đã kết nối chưa (CÁCH SỬA MỚI)
         if vc and vc.is_connected():
             return
 
-        # Kiểm tra xem bot đã ở trong phòng voice nào chưa (CÁCH SỬA MỚI)
+        # Kiểm tra xem bot đã ở trong phòng chưa
         for guild in bot.guilds:
-            # Lấy voice client của guild hiện tại
-            voice_client = guild.voice_client
-            if voice_client and voice_client.channel.id == VOICE_CHANNEL_ID:
-                vc = voice_client
-                print(f"✅ Đã kết nối vào phòng: {channel.name}")
-                if auto_play and not is_playing:
-                    await play_loop()
-                return
+            for vc_client in guild.voice_clients:
+                if vc_client.channel.id == VOICE_CHANNEL_ID:
+                    vc = vc_client
+                    print(f"✅ Đã kết nối vào phòng: {channel.name}")
+                    if auto_play and not is_playing:
+                        await play_loop()
+                    return
 
-        # Nếu chưa kết nối, tạo kết nối mới
         vc = await channel.connect()
         reconnect_count = 0
         print(f"✅ Đã kết nối vào phòng: {channel.name}")
@@ -122,6 +120,7 @@ def after_playing(error):
     if error:
         print(f"❌ Lỗi phát nhạc: {error}")
     else:
+        # Tự động phát bài tiếp theo dựa trên loop_mode
         asyncio.run_coroutine_threadsafe(handle_next_song(), bot.loop)
 
 async def handle_next_song():
@@ -132,13 +131,17 @@ async def handle_next_song():
         return
     
     if loop_mode == "loop_one":
+        # Phát lại bài hiện tại
         pass
     elif loop_mode == "loop_all":
+        # Chuyển sang bài tiếp theo
         current_index = (current_index + 1) % len(playlist)
         current_mp3 = playlist[current_index]
     elif loop_mode == "shuffle":
+        # Chọn bài ngẫu nhiên
         current_mp3 = random.choice(playlist)
     elif loop_mode == "none":
+        # Không phát tiếp
         return
     
     await play_loop()
@@ -155,6 +158,7 @@ async def play_loop():
     
     if not os.path.exists(current_mp3):
         print(f"❌ Không tìm thấy file: {current_mp3}")
+        # Tìm file khác
         mp3_files = find_mp3_files()
         if mp3_files:
             current_mp3 = mp3_files[0]
@@ -163,13 +167,17 @@ async def play_loop():
             return
     
     try:
+        # Tạo FFmpeg source với volume
         ffmpeg_options = {}
         if volume_level != 1.0:
             ffmpeg_options['before_options'] = f'-filter:a "volume={volume_level}"'
         
         source = discord.FFmpegPCMAudio(current_mp3, **ffmpeg_options)
         
-        vc.play(source, after=after_playing)
+        vc.play(
+            source,
+            after=after_playing
+        )
         is_playing = True
         print(f"🎵 Đang phát: {os.path.basename(current_mp3)}")
         print(f"🔊 Âm lượng: {int(volume_level * 100)}%")
@@ -186,15 +194,17 @@ async def on_voice_state_update(member, before, after):
     if member == bot.user:
         return
     
+    # Xử lý khi có người vào
     if after.channel and after.channel.id == VOICE_CHANNEL_ID:
         if vc and vc.is_connected() and auto_play:
             if not is_playing:
                 print(f"👤 {member.display_name} vào phòng - Phát nhạc!")
                 await play_loop()
     
+    # Xử lý khi phòng trống
     if before.channel and before.channel.id == VOICE_CHANNEL_ID:
         channel = bot.get_channel(VOICE_CHANNEL_ID)
-        if channel and len(channel.members) <= 1:
+        if channel and len(channel.members) <= 1:  # Chỉ còn bot
             if auto_play and is_playing:
                 print("🔇 Phòng trống - Tạm dừng phát nhạc")
                 if vc and vc.is_playing():
@@ -219,13 +229,14 @@ async def on_command_error(ctx, error):
 @bot.command(name='play', aliases=['p', 'phat'])
 async def play_cmd(ctx, *, filename: str = None):
     """Phát nhạc - !play [tên file]"""
-    global vc, is_playing, current_mp3
+    global vc, is_playing, current_mp3, playlist
     
     if not vc or not vc.is_connected():
         await ctx.send("❌ Chưa kết nối voice! Dùng `!join`")
         return
     
     if filename:
+        # Tìm file MP3 theo tên
         mp3_files = find_mp3_files()
         found = None
         for f in mp3_files:
@@ -297,6 +308,7 @@ async def volume_cmd(ctx, vol: int):
     
     volume_level = vol / 100
     if vc and vc.is_playing():
+        # Áp dụng volume mới bằng cách restart stream
         vc.stop()
         await play_loop()
     
@@ -317,6 +329,7 @@ async def loop_cmd(ctx, mode: str = None):
         loop_mode = modes[mode.lower()]
         await ctx.send(f"🔄 Đã chuyển sang chế độ: **{mode.upper()}**")
     else:
+        # Hiển thị chế độ hiện tại
         mode_names = {
             'loop_one': '🔁 Phát lại bài hiện tại',
             'loop_all': '🔁 Phát toàn bộ playlist',
@@ -334,6 +347,7 @@ async def playlist_cmd(ctx):
         await ctx.send("📁 Không có file MP3 nào!")
         return
     
+    # Hiển thị tối đa 20 bài
     display = []
     for i, f in enumerate(mp3_files[:20], 1):
         name = os.path.basename(f)
