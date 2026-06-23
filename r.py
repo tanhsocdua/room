@@ -66,6 +66,9 @@ volume_level = 0.5  # Mặc định 50%
 loop_mode = "loop_one"  # loop_one, loop_all, shuffle, none
 auto_play = True  # Tự động phát khi có người vào
 
+# ==================== XÓA LỆNH HELP MẶC ĐỊNH ====================
+bot.remove_command('help')  # THÊM DÒNG NÀY ĐỂ XÓA LỆNH HELP CŨ
+
 @bot.event
 async def on_ready():
     print(f"\n✅ Bot đã đăng nhập: {bot.user}")
@@ -302,7 +305,7 @@ async def skip_cmd(ctx):
 async def volume_cmd(ctx, vol: int):
     """Chỉnh âm lượng - !volume 50"""
     global volume_level
-    if not (0 <= vol <= 1000):
+    if not (0 <= vol <= 100):
         await ctx.send("❌ Âm lượng phải từ 0-100")
         return
     
@@ -397,7 +400,7 @@ async def status_cmd(ctx):
 
 🔌 Kết nối: {'✅' if vc and vc.is_connected() else '❌'}
 🎵 Đang phát: {'✅' if is_playing else '❌'}
-🎚️ Âm lượng: {int(volume_level * 1000)}%
+🎚️ Âm lượng: {int(volume_level * 100)}%
 🔄 Chế độ lặp: {loop_mode}
 🎤 Số người trong phòng: {len(channel.members) if channel else 0}
 📁 Số file MP3: {len(find_mp3_files())}
@@ -407,6 +410,7 @@ async def status_cmd(ctx):
 """
     await ctx.send(status)
 
+# ==================== LỆNH HELP ĐÃ SỬA ====================
 @bot.command(name='help', aliases=['h', 'trogiup'])
 async def help_cmd(ctx):
     """Hiển thị danh sách lệnh"""
@@ -424,7 +428,7 @@ async def help_cmd(ctx):
             "`!pause` - Tạm dừng\n"
             "`!resume` - Tiếp tục\n"
             "`!skip` - Bỏ qua bài\n"
-            "`!volume <0-1000>` - Chỉnh âm lượng"
+            "`!volume <0-100>` - Chỉnh âm lượng"
         ),
         inline=False
     )
